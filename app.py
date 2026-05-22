@@ -411,17 +411,47 @@ def extract_image(f):
 
 def extract_csv_excel(f):
     """Read CSV/Excel into pandas, store as JSON-safe marker."""
-    try:
-        import pandas as pd
-        f.seek(0); name = f.name.lower()
-        if name.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(f.read()))
-        elif name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(f.read()))
-        else:
-            return "[Unsupported tabular format]"
+    import pandas as pd
+    name = f.name.lower()
+    df = None
+    error_detail = ""
 
-        # Store everything as a single JSON blob — no pipe delimiter issues
+    # ── CSV: try multiple encodings and separators ──────────────────────────
+    if name.endswith(".csv"):
+        f.seek(0)
+        raw = f.read()
+        for enc in ["utf-8", "utf-8-sig", "latin-1", "cp1252", "iso-8859-1"]:
+            for sep in [",", ";", "\t", "|"]:
+                try:
+                    df = pd.read_csv(io.BytesIO(raw), encoding=enc, sep=sep)
+                    # Must have at least 2 columns or clearly delimited
+                    if df.shape[1] >= 1 and df.shape[0] >= 1:
+                        break
+                except Exception as e:
+                    error_detail = str(e)
+            if df is not None and df.shape[1] >= 1:
+                break
+
+    # ── Excel ───────────────────────────────────────────────────────────────
+    elif name.endswith((".xlsx", ".xls")):
+        try:
+            f.seek(0)
+            df = pd.read_excel(io.BytesIO(f.read()))
+        except Exception as e:
+            error_detail = str(e)
+    else:
+        return "[Unsupported tabular format]"
+
+    if df is None or df.empty:
+        return f"[CSV/Excel error: Could not parse file. {error_detail}]"
+
+    # Drop completely empty rows/columns
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+
+    # Sanitize column names
+    df.columns = [str(c).strip() for c in df.columns]
+
+    try:
         payload = {
             "shape": f"{df.shape[0]} rows × {df.shape[1]} columns",
             "columns": {col: str(df[col].dtype) for col in df.columns},
@@ -430,7 +460,7 @@ def extract_csv_excel(f):
         }
         return f"__DATAFRAME__{json.dumps(payload)}"
     except Exception as e:
-        return f"[CSV/Excel error: {e}]"
+        return f"[CSV/Excel serialization error: {e}]"
 
 def is_image_data(text):
     return text and text.startswith("__IMAGE_B64__")
@@ -1191,13 +1221,30 @@ def render_sidebar():
                 if uf.name not in st.session_state["processed_files"]:
                     with st.spinner(f"Reading {uf.name}..."):
                         txt = process_upload(uf)
-                        if txt and not txt.startswith("["):
+                        # Detect failure: starts with [<something> error:] pattern
+                        is_error = (
+                            not txt
+                            or (txt.startswith("[") and ("error" in txt.lower() or "unsupported" in txt.lower()))
+                        )
+                        if not is_error:
                             st.session_state["doc_texts"][uf.name] = txt
                             preview = txt[:500] if not (is_image_data(txt) or is_dataframe_data(txt)) else txt[:100]
                             save_doc_record(user["user_id"], uf.name, uf.name.split(".")[-1], preview)
                             st.session_state["processed_files"].append(uf.name)
+                            # Show row/col info for tabular files
+                            if is_dataframe_data(txt):
+                                try:
+                                    import json as _json
+                                    _payload = _json.loads(txt[len("__DATAFRAME__"):])
+                                    st.success(f"✅ Loaded **{uf.name}** — {_payload['shape']}")
+                                except Exception:
+                                    st.success(f"✅ Loaded **{uf.name}**")
                             st.rerun()
-                        else: st.error(f"Failed: {uf.name}")
+                        else:
+                            # Show specific error from the extractor
+                            detail = txt if txt else "Unknown error"
+                            st.error(f"❌ Failed to load **{uf.name}**\n\n{detail}")
+                            st.info("💡 **Tips for CSV files:** Make sure the file uses comma, semicolon, tab, or pipe as delimiter. Check for encoding issues (try saving as UTF-8 in Excel).")
 
         # URL input
         st.markdown('<hr class="sd">', unsafe_allow_html=True)
