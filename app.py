@@ -512,6 +512,62 @@ def get_llm(max_tokens=2000):
     )
 
 
+def classify_error(e: Exception) -> str:
+    """Return a user-friendly error message based on the exception type/message."""
+    msg = str(e).lower()
+    # Authentication / credentials
+    if any(k in msg for k in ["401", "unauthorized", "invalid api key", "authentication", "api key"]):
+        return (
+            "🔑 **Authentication Error**\n\n"
+            "Your Azure OpenAI API key is invalid or expired.\n"
+            "→ Go to **🔑 API Configuration** in the sidebar and re-enter your credentials."
+        )
+    # Wrong endpoint / resource not found
+    if any(k in msg for k in ["404", "not found", "resource not found", "deployment", "no such host"]):
+        return (
+            "🔗 **Endpoint / Deployment Not Found**\n\n"
+            "The Azure endpoint URL or deployment name is incorrect.\n"
+            "→ Check your **Model Endpoint** in **🔑 API Configuration** — make sure it points to the correct Azure resource and that the `gpt-4o` deployment exists."
+        )
+    # Rate limit / quota
+    if any(k in msg for k in ["429", "rate limit", "quota", "too many requests", "exceeded"]):
+        return (
+            "⏱️ **Rate Limit / Quota Exceeded**\n\n"
+            "Your Azure OpenAI quota has been reached.\n"
+            "→ Wait a moment and try again, or check your Azure quota limits in the Azure Portal."
+        )
+    # Connection / network
+    if any(k in msg for k in ["connection", "network", "timeout", "timed out", "connect", "ssl", "unreachable", "socket", "refused"]):
+        return (
+            "🌐 **Connection Error**\n\n"
+            "Could not reach the Azure OpenAI service. Possible causes:\n"
+            "- Your Azure endpoint URL is incorrect or missing\n"
+            "- Network/firewall is blocking the request\n"
+            "- The Azure service is temporarily unavailable\n\n"
+            "→ Double-check your **Model Endpoint** in **🔑 API Configuration** and try again."
+        )
+    # Token / context length
+    if any(k in msg for k in ["token", "context length", "maximum context", "too long"]):
+        return (
+            "📄 **Document Too Large**\n\n"
+            "The content sent to the AI exceeds the model's context limit.\n"
+            "→ Try asking about a smaller section, or remove some uploaded documents and retry."
+        )
+    # Content filter
+    if any(k in msg for k in ["content filter", "content_filter", "responsible ai", "flagged"]):
+        return (
+            "🚫 **Content Filter Triggered**\n\n"
+            "The request was blocked by Azure's content safety policy.\n"
+            "→ Try rephrasing your question."
+        )
+    # Fallback
+    return (
+        f"⚠️ **Unexpected Error**\n\n"
+        f"`{str(e)}`\n\n"
+        "→ Please check your API credentials in **🔑 API Configuration** and try again."
+    )
+
+
 # ═══════════════════════════════════════════════
 # SMART ROUTING — keyword-based, no LLM hallucination
 # ═══════════════════════════════════════════════
@@ -723,7 +779,7 @@ def run_combined_query(prompt, image_entries, text_entries, df_entries, user, ci
         tool_info = ", ".join(tools) if tools else None
         return answer, sources, tool_info, None
     except Exception as e:
-        return f"Error: {str(e)}", [], None, None
+        return classify_error(e), [], None, None
 
 
 def run_dataframe_analysis(query, df_entries):
@@ -833,7 +889,7 @@ Output ONLY Python code. No markdown fences."""
                 return basic, None
 
     except Exception as e:
-        return f"Analysis error: {str(e)}", None
+        return classify_error(e), None
 
 
 def run_doc_qa(prompt, text_entries, user, cid):
@@ -855,7 +911,7 @@ def run_doc_qa(prompt, text_entries, user, cid):
         answer = resp.content if resp.content else "I couldn't find an answer in your documents."
         return answer, extract_sources(answer), "Document Q&A"
     except Exception as e:
-        return f"Error: {str(e)}", [], None
+        return classify_error(e), [], None
 
 
 def run_web_agent(prompt, user, cid):
@@ -864,7 +920,11 @@ def run_web_agent(prompt, user, cid):
     if agent is None:
         agent, error = init_agent()
         if error:
-            return f"⚠️ {error}\n\nPlease configure your API credentials.", [], None
+            return (
+                "🔑 **API Not Configured**\n\n"
+                f"{error}\n\n"
+                "→ Open **🔑 API Configuration** in the sidebar and enter your Azure OpenAI credentials."
+            ), [], None
         st.session_state["agent"] = agent
     session_id = f"{user['user_id']}_{cid}"
     try:
@@ -878,7 +938,7 @@ def run_web_agent(prompt, user, cid):
             if tools_used: tool_info = ", ".join(tools_used)
         return answer, extract_sources(answer), tool_info
     except Exception as e:
-        return f"Error: {str(e)}\n\nTry rephrasing your question.", [], None
+        return classify_error(e), [], None
 
 
 # ═══════════════════════════════════════════════
