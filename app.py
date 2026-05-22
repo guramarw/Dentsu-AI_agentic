@@ -728,6 +728,53 @@ def is_tire_related(query):
     return bool(query_words & TIRE_DOMAIN_KEYWORDS)
 
 
+# ── Hybrid query detector — needs both docs AND web ──────────────────────────
+HYBRID_KEYWORDS = {
+    # Compare local data vs market
+    "compare", "comparison", "vs", "versus", "against", "benchmark", "difference",
+    "better", "cheaper", "cheapest", "expensive", "best deal", "best price",
+    # Find suppliers / alternatives
+    "find supplier", "find suppliers", "where can i buy", "where to buy",
+    "alternative", "alternatives", "other supplier", "other brand", "substitute",
+    "source", "sourcing", "who sells", "who supply", "who supplies",
+    # Market vs my data
+    "market price", "market rate", "current price", "latest price", "online price",
+    "web price", "going rate", "fair price", "price check",
+    "my inventory", "my stock", "my data", "my list", "my quote",
+    "uploaded", "i have", "we have", "our stock", "our inventory",
+    # Gap / need analysis
+    "missing", "not in stock", "out of stock", "need to order", "reorder",
+    "shortage", "gap", "fill", "replenish", "restock",
+    # Supplier discovery
+    "supplier for", "vendor for", "distributor", "wholesaler", "importer",
+    "local supplier", "online supplier", "ph supplier", "philippines supplier",
+}
+
+def is_hybrid_query(query):
+    """
+    Returns True when the query needs BOTH uploaded data AND web search.
+    E.g. 'compare my prices with market', 'find suppliers for items in my inventory'.
+    """
+    q = query.lower()
+    # Check multi-word phrases first
+    for phrase in ["find supplier", "find suppliers", "where can i buy", "where to buy",
+                   "market price", "market rate", "current price", "latest price",
+                   "online price", "fair price", "price check", "my inventory",
+                   "my stock", "my data", "my list", "my quote", "our stock",
+                   "our inventory", "not in stock", "out of stock", "need to order",
+                   "best deal", "best price", "other supplier", "supplier for",
+                   "vendor for", "ph supplier", "philippines supplier"]:
+        if phrase in q:
+            return True
+    # Single word check
+    words = set(re.findall(r'\b[a-zA-Z]{2,}\b', q))
+    hits = words & {"compare", "comparison", "versus", "benchmark", "cheaper",
+                    "cheapest", "alternative", "alternatives", "source", "sourcing",
+                    "distributor", "wholesaler", "importer", "missing", "shortage",
+                    "gap", "replenish", "restock", "reorder"}
+    return bool(hits)
+
+
 OUT_OF_CONTEXT_MSG = (
     "\u26a0\ufe0f **Out of Context**\n\n"
     "I'm **TireSource AI**, specialized exclusively in tire sourcing, procurement, "
@@ -959,6 +1006,117 @@ def run_doc_qa(prompt, text_entries, user, cid):
         return answer, extract_sources(answer), "Document Q&A"
     except Exception as e:
         return classify_error(e), [], None
+
+
+def run_hybrid_agent(prompt, user, cid):
+    """
+    Hybrid agent: extracts key data from uploaded docs/CSVs, then enriches
+    with live web search to produce a combined comparison/sourcing answer.
+    """
+    today_str = datetime.now().strftime("%B %d, %Y")
+
+    # ── Step 1: Extract structured data from uploaded docs ──────────────────
+    image_entries, text_entries, df_entries = classify_doc_types()
+
+    doc_context_parts = []
+
+    # Tabular data (CSV/Excel) — most useful for price/inventory comparison
+    for name, df in df_entries:
+        try:
+            preview = df_to_markdown(df, max_rows=50)
+            doc_context_parts.append(f"### 📊 Inventory/Price Data from `{name}`\n{preview}")
+        except Exception:
+            doc_context_parts.append(f"### 📊 Data from `{name}`\n(could not render preview)")
+
+    # Text docs (PDF, DOCX, etc.)
+    for name, txt in text_entries:
+        snippet = txt[:2000]
+        doc_context_parts.append(f"### 📄 Document: `{name}`\n{snippet}")
+
+    doc_context = "\n\n".join(doc_context_parts) if doc_context_parts else "No documents uploaded."
+
+    # ── Step 2: Build a web search query from the user's prompt + doc context ──
+    llm = get_llm(max_tokens=300)
+    try:
+        search_query_resp = llm.invoke([
+            SystemMessage(content="You are a tire procurement specialist. Given a user question and their inventory context, "
+                          "produce a SHORT and SPECIFIC web search query (max 12 words) to find market prices, suppliers, "
+                          "or alternatives for the tires mentioned. Return ONLY the search query, nothing else."),
+            HumanMessage(content=f"User question: {prompt}\n\nInventory context (first 500 chars):\n{doc_context[:500]}")
+        ])
+        web_query = search_query_resp.content.strip().strip('"')
+    except Exception:
+        web_query = prompt  # fallback
+
+    # ── Step 3: Run web search ──────────────────────────────────────────────
+    web_context = ""
+    sources = []
+    TK = "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"
+    try:
+        os.environ["TAVILY_API_KEY"] = TK
+        from langchain_community.tools.tavily_search import TavilySearchResults
+        tavily = TavilySearchResults(max_results=6, search_depth="advanced", include_raw_content=True)
+        results = tavily.invoke(web_query)
+        web_parts = []
+        for i, r in enumerate(results, 1):
+            url = r.get("url", "")
+            title = r.get("title", "")
+            body = r.get("content", "")[:600]
+            web_parts.append(f"[{i}] **{title}**\n{body}\nSource: {url}")
+            if url:
+                domain = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
+                if domain and domain not in [s["domain"] for s in sources]:
+                    sources.append({"url": url, "domain": domain})
+        web_context = "\n\n---\n\n".join(web_parts)
+    except Exception as e:
+        web_context = f"Web search unavailable: {e}"
+
+    # ── Step 4: Synthesize combined answer ──────────────────────────────────
+    llm2 = get_llm(max_tokens=2000)
+    synthesis_prompt = f"""You are TireSource AI — a tire sourcing and procurement intelligence assistant.
+Today is {today_str}.
+
+The user asked: **{prompt}**
+
+---
+## MY UPLOADED DATA (inventory / quotes / price lists):
+{doc_context}
+
+---
+## LIVE WEB SEARCH RESULTS (for: "{web_query}"):
+{web_context}
+
+---
+## YOUR TASK:
+Using BOTH the uploaded data and the web search results above, provide a comprehensive answer.
+
+If comparing prices:
+- Show a side-by-side table: My Price vs Market Price, with % difference
+- Flag items where market price is significantly lower (good deals to source externally)
+- Flag items where my price is already competitive
+
+If finding suppliers:
+- List specific suppliers/websites found online with their prices if available
+- Match them to items in the uploaded inventory
+- Note MOQ, shipping, or lead time if mentioned in search results
+
+If doing gap analysis:
+- Identify what's missing or low in inventory
+- Suggest specific online sources to restock
+
+Always format with markdown. Use tables for comparisons. Include source links.
+Be specific — use actual brand names, sizes, and prices from the data provided.
+"""
+    try:
+        resp = llm2.invoke([
+            SystemMessage(content="You are TireSource AI, a tire procurement expert. Answer using the exact data provided. Format clearly with markdown tables."),
+            HumanMessage(content=synthesis_prompt)
+        ])
+        answer = resp.content
+    except Exception as e:
+        answer = classify_error(e)
+
+    return answer, sources, "Hybrid: Docs + Web Search"
 
 
 def run_web_agent(prompt, user, cid):
@@ -1414,30 +1572,35 @@ def render_chat():
             )
 
         elif has_docs:
-            # Keyword-based relevancy — fast, deterministic, no hallucination
-            query_about_docs = is_query_about_docs(prompt)
+            # ── Hybrid check: needs both docs + web? ──
+            if is_hybrid_query(prompt):
+                with st.chat_message("assistant", avatar="🛞"):
+                    with st.spinner("🔀 Cross-referencing your data with live market info..."):
+                        answer, sources, tool_info = run_hybrid_agent(prompt, user, cid)
+                    display_text = clean_answer_urls(answer, sources) if sources else answer
+                    st.markdown(display_text)
+                    render_sources_and_tools(sources, tool_info)
+                save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
+                st.session_state["messages"].append(
+                    {"role": "assistant", "content": answer, "sources": sources, "tool_calls": tool_info}
+                )
 
-            if query_about_docs:
-                # Route to combined document handler (supports all doc types at once)
+            # ── Doc-only query ──
+            elif is_query_about_docs(prompt):
                 image_entries, text_entries, df_entries = classify_doc_types()
-
                 with st.chat_message("assistant", avatar="🛞"):
                     with st.spinner("Analyzing your documents..."):
                         answer, sources, tool_info, chart_fig = run_combined_query(
                             prompt, image_entries, text_entries, df_entries, user, cid
                         )
-
                     display_text = clean_answer_urls(answer, sources) if sources else answer
                     st.markdown(display_text)
-
                     chart_key = None
                     if chart_fig is not None:
                         chart_key = f"chart_{uuid.uuid4().hex[:8]}"
                         st.session_state.setdefault("charts", {})[chart_key] = chart_fig
                         st.pyplot(chart_fig)
-
                     render_sources_and_tools(sources, tool_info)
-
                 save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
                 st.session_state["messages"].append(
                     {"role": "assistant", "content": answer, "sources": sources,
@@ -1446,7 +1609,7 @@ def render_chat():
 
             else:
                 # Tire-related but not in docs — offer web search
-                routing_msg = ("This query doesn't appear to be in your uploaded sourcing documents.\n\n"
+                routing_msg = ("This doesn't appear to be in your uploaded sourcing documents.\n\n"
                               "Would you like me to **search the web** for tire pricing, supplier info, or specifications?\n\n"
                               "Type **Yes** to search the web, or **No** to cancel.")
                 with st.chat_message("assistant", avatar="🛞"):
@@ -1458,7 +1621,7 @@ def render_chat():
                 )
 
         else:
-            # No docs uploaded — search the web directly (tire-related confirmed above)
+            # No docs — web only (tire-related confirmed above)
             with st.chat_message("assistant", avatar="🛞"):
                 with st.spinner("Researching your question..."):
                     answer, sources, tool_info = run_web_agent(prompt, user, cid)
