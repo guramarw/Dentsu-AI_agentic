@@ -593,6 +593,52 @@ def is_query_about_docs(query):
     return False
 
 
+# ── Tire domain topic checker ──────────────────────────────────────────────
+TIRE_DOMAIN_KEYWORDS = {
+    "tire", "tyre", "tires", "tyres", "tread", "sidewall", "bead", "ply",
+    "rim", "wheel", "tube", "tubeless", "radial", "bias", "runflat", "retread",
+    "vulcanize", "compound", "rubber",
+    "size", "width", "aspect", "ratio", "diameter", "load", "index", "speed",
+    "rating", "utqg", "treadwear", "traction", "temperature", "psi", "pressure",
+    "inflation", "balancing", "alignment", "rotation", "torque",
+    "passenger", "suv", "truck", "otr", "agricultural", "industrial", "motorcycle",
+    "bicycle", "atv", "forklift", "mining", "oem", "aftermarket", "winter",
+    "summer", "allseason", "performance", "offroad", "highway",
+    "supplier", "vendors", "quote", "quotation", "rfq", "price", "pricing",
+    "cost", "moq", "minimum", "order", "quantity", "lead", "time", "delivery",
+    "shipment", "freight", "import", "export", "tariff", "duty", "incoterms",
+    "warranty", "guarantee", "stock", "inventory", "availability", "catalogue",
+    "catalog", "invoice", "purchase", "procurement", "sourcing", "tender",
+    "bid", "contract", "fleet", "bulk",
+    "michelin", "bridgestone", "goodyear", "continental", "pirelli", "hankook",
+    "yokohama", "dunlop", "toyo", "falken", "kumho", "maxxis", "nexen",
+    "nitto", "bfgoodrich", "cooper", "firestone", "general", "sumitomo",
+    "triangle", "sailun", "westlake", "linglong",
+    "compare", "comparison", "cheapest", "best", "recommend", "recommendation",
+    "analysis", "report", "chart", "graph", "data", "summarize", "summary",
+    "document", "file", "uploaded", "spreadsheet",
+}
+
+def is_tire_related(query):
+    """Returns True only if query is about tires, sourcing, or procurement."""
+    query_words = set(re.findall(r'\b[a-zA-Z]{3,}\b', query.lower()))
+    return bool(query_words & TIRE_DOMAIN_KEYWORDS)
+
+
+OUT_OF_CONTEXT_MSG = (
+    "\u26a0\ufe0f **Out of Context**\n\n"
+    "I'm **TireSource AI**, specialized exclusively in tire sourcing, procurement, "
+    "and related supply chain topics.\n\n"
+    "I can help you with:\n"
+    "- \U0001f6de Tire specifications, sizes, and brand comparisons\n"
+    "- \U0001f4b0 Supplier quotes, pricing, and cost analysis\n"
+    "- \U0001f4e6 Inventory, MOQ, lead times, and delivery\n"
+    "- \U0001f4c4 Analyzing uploaded quotes, spec sheets, or price lists\n"
+    "- \U0001f310 Live market research on tire suppliers\n\n"
+    "Please ask something related to tires or procurement!"
+)
+
+
 # ═══════════════════════════════════════════════
 # EXECUTION PATHS
 # ═══════════════════════════════════════════════
@@ -1234,7 +1280,16 @@ def render_chat():
         # ── MAIN ROUTING ──
         has_docs = bool(st.session_state.get("doc_texts"))
 
-        if has_docs:
+        # ── Gate 1: Out-of-context check (always runs first) ──
+        if not is_tire_related(prompt):
+            with st.chat_message("assistant", avatar="🛞"):
+                st.markdown(OUT_OF_CONTEXT_MSG)
+            save_message(cid, "assistant", OUT_OF_CONTEXT_MSG)
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": OUT_OF_CONTEXT_MSG, "sources": None, "tool_calls": "Out of Context"}
+            )
+
+        elif has_docs:
             # Keyword-based relevancy — fast, deterministic, no hallucination
             query_about_docs = is_query_about_docs(prompt)
 
@@ -1266,8 +1321,8 @@ def render_chat():
                 )
 
             else:
-                # Not about docs — ask user if they want web search
-                routing_msg = ("This query doesn't appear to be related to your uploaded sourcing documents.\n\n"
+                # Tire-related but not in docs — offer web search
+                routing_msg = ("This query doesn't appear to be in your uploaded sourcing documents.\n\n"
                               "Would you like me to **search the web** for tire pricing, supplier info, or specifications?\n\n"
                               "Type **Yes** to search the web, or **No** to cancel.")
                 with st.chat_message("assistant", avatar="🛞"):
@@ -1279,7 +1334,7 @@ def render_chat():
                 )
 
         else:
-            # No docs uploaded — straight to web agent
+            # No docs uploaded — search the web directly (tire-related confirmed above)
             with st.chat_message("assistant", avatar="🛞"):
                 with st.spinner("Researching your question..."):
                     answer, sources, tool_info = run_web_agent(prompt, user, cid)
