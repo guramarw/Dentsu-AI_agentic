@@ -409,6 +409,23 @@ def extract_image(f):
         return f"__IMAGE_B64__{json.dumps({'mime': mime_map.get(ext, 'image/png'), 'b64': b64})}"
     except Exception as e: return f"[Image error: {e}]"
 
+def df_to_markdown(df, max_rows=20):
+    """Convert DataFrame to markdown table without requiring tabulate."""
+    df = df.head(max_rows)
+    cols = list(df.columns)
+    header = "| " + " | ".join(str(c) for c in cols) + " |"
+    sep    = "| " + " | ".join("---" for _ in cols) + " |"
+    rows   = []
+    for _, row in df.iterrows():
+        rows.append("| " + " | ".join(str(v) for v in row.values) + " |")
+    return "\n".join([header, sep] + rows)
+
+
+def df_describe_markdown(df):
+    """Convert df.describe() to markdown without tabulate."""
+    return df_to_markdown(df.describe().reset_index())
+
+
 def extract_csv_excel(f):
     """Read CSV/Excel into pandas, store as JSON-safe marker."""
     import pandas as pd
@@ -455,7 +472,7 @@ def extract_csv_excel(f):
         payload = {
             "shape": f"{df.shape[0]} rows × {df.shape[1]} columns",
             "columns": {col: str(df[col].dtype) for col in df.columns},
-            "preview_md": df.head(20).to_markdown(index=False),
+            "preview_md": df_to_markdown(df, max_rows=20),
             "data_json": df.to_json(orient="records", date_format="iso")
         }
         return f"__DATAFRAME__{json.dumps(payload)}"
@@ -884,14 +901,14 @@ Output ONLY Python code. No explanation. No markdown fences."""
                 return resp2.content.strip(), fig
 
             except Exception as e:
-                return f"**Chart error:** {e}\n\nGenerated code:\n```python\n{code}\n```\n\nFalling back to basic stats:\n\n{df.describe().to_markdown()}", None
+                return f"**Chart error:** {e}\n\nGenerated code:\n```python\n{code}\n```\n\nFalling back to basic stats:\n\n{df_describe_markdown(df)}", None
 
         else:
             code_prompt = f"""Given this DataFrame schema:
 {schema_info}
 
 First rows:
-{df.head().to_markdown(index=False)}
+{df_to_markdown(df, max_rows=5)}
 
 User question: {query}
 
@@ -915,7 +932,7 @@ Output ONLY Python code. No markdown fences."""
                 return str(result), None
             except Exception as e:
                 basic = f"**Data Overview: {primary_name}** ({payload['shape']})\n\n"
-                basic += df.describe().to_markdown() + f"\n\n*Code error: {e}*"
+                basic += df_describe_markdown(df) + f"\n\n*Code error: {e}*"
                 return basic, None
 
     except Exception as e:
