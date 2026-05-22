@@ -1,12 +1,13 @@
 """
-Dentsu Smart Buddy — v5.1 (Production)
+TireSource AI — v5.1 (Production)
 =========================================
+A tire sourcing & procurement intelligence assistant.
 Features:
   1. Smart keyword-based routing (no LLM hallucination) — works per doc type
-  2. Professional onboarding page — "Dentsu Smart Buddy"
-  3. URL/blog link → WebLoader → Q&A
-  4. CSV/Excel → pandas analysis + chart generation
-  5. Multi-document interaction (image + doc + csv simultaneously)
+  2. Professional onboarding page — "TireSource AI"
+  3. URL/supplier link → WebLoader → Q&A
+  4. CSV/Excel → pandas analysis + chart generation (pricing, inventory, spend)
+  5. Multi-document interaction (spec sheets + quotes + inventory simultaneously)
   6. Compatible with langchain==1.2.17, langchain-core==1.3.3,
      langchain-classic==1.0.5, langchain-community==0.4.1,
      langchain-openai==1.1.10 on Python 3.11
@@ -28,8 +29,8 @@ from warnings import filterwarnings
 filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="Dentsu Smart Buddy",
-    page_icon="🔵",
+    page_title="TireSource AI",
+    page_icon="🛞",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -42,24 +43,24 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-    --primary: #0033A0;
-    --primary-dim: rgba(0,51,160,0.10);
-    --primary-border: rgba(0,51,160,0.18);
-    --primary-glow: rgba(0,51,160,0.25);
-    --accent: #00C4B3;
-    --accent-dim: rgba(0,196,179,0.10);
-    --bg-root: #0A0D12;
-    --bg-surface: #10141B;
-    --bg-card: #161B25;
-    --bg-elevated: #1D2330;
-    --text-100: #F0F2F5;
-    --text-200: #C4CAD4;
-    --text-300: #8B95A5;
-    --text-400: #5E6878;
+    --primary: #1A7A4A;
+    --primary-dim: rgba(26,122,74,0.10);
+    --primary-border: rgba(26,122,74,0.18);
+    --primary-glow: rgba(26,122,74,0.25);
+    --accent: #F5A623;
+    --accent-dim: rgba(245,166,35,0.10);
+    --bg-root: #0A0D0C;
+    --bg-surface: #0F1410;
+    --bg-card: #151C16;
+    --bg-elevated: #1C261E;
+    --text-100: #F0F2F0;
+    --text-200: #C4CEC6;
+    --text-300: #8B9A8D;
+    --text-400: #5E6E60;
     --border: rgba(255,255,255,0.06);
-    --border-focus: rgba(0,51,160,0.45);
-    --blue: #6B8AFF;
-    --blue-dim: rgba(107,138,255,0.10);
+    --border-focus: rgba(26,122,74,0.45);
+    --blue: #6BBA8A;
+    --blue-dim: rgba(107,186,138,0.10);
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
@@ -192,14 +193,14 @@ section[data-testid="stSidebar"] .stMarkdown span {
     border-radius: 20px; padding: 0.2rem 0.6rem;
     font-size: 0.68rem; color: #8B95A5; text-decoration: none !important; transition: all 0.15s;
 }
-.src-chip:hover { border-color: rgba(0,51,160,0.3); color: #0033A0; background: rgba(0,51,160,0.08); }
+.src-chip:hover { border-color: rgba(26,122,74,0.3); color: #1A7A4A; background: rgba(26,122,74,0.08); }
 .src-chip .sd2 { width: 5px; height: 5px; border-radius: 50%; background: #6B8AFF; flex-shrink: 0; }
 
 .tbadge {
     display: inline-block; margin-top: 0.3rem;
-    background: rgba(0,51,160,0.08); border: 1px solid rgba(0,51,160,0.18);
+    background: rgba(26,122,74,0.08); border: 1px solid rgba(26,122,74,0.18);
     border-radius: 20px; padding: 0.12rem 0.55rem;
-    font-size: 0.62rem; font-weight: 500; color: #0033A0; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem; font-weight: 500; color: #1A7A4A; font-family: 'JetBrains Mono', monospace;
 }
 
 .welcome-area { text-align: center; padding: 10vh 2rem 4rem 2rem; }
@@ -230,7 +231,7 @@ section[data-testid="stSidebar"] .stMarkdown span {
     font-family: 'Inter', sans-serif !important; font-weight: 600 !important;
     border-radius: var(--radius-sm) !important; transition: all 0.2s !important; font-size: 0.84rem !important;
 }
-form .stButton > button { background: linear-gradient(135deg, var(--primary), #0044CC) !important; color: #fff !important; border: none !important; }
+form .stButton > button { background: linear-gradient(135deg, var(--primary), #22A05E) !important; color: #fff !important; border: none !important; }
 form .stButton > button:hover { box-shadow: 0 4px 16px var(--primary-glow) !important; transform: translateY(-1px) !important; }
 section[data-testid="stSidebar"] .stButton > button {
     background: var(--bg-card) !important; color: var(--text-200) !important; border: 1px solid var(--border) !important;
@@ -262,7 +263,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 # DATABASE
 # ═══════════════════════════════════════════════
 
-DB_PATH = "research_assistant.db"
+DB_PATH = "tiresource.db"
 
 def init_database():
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
@@ -286,7 +287,7 @@ def init_database():
         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
     conn.commit(); conn.close()
 
-def _hash(pw): return hashlib.sha256(f"dentsu_salt_2025_{pw}".encode()).hexdigest()
+def _hash(pw): return hashlib.sha256(f"tiresource_salt_2025_{pw}".encode()).hexdigest()
 
 def register_user(username, password):
     uid = str(uuid.uuid4()); display = username.strip().title()
@@ -569,7 +570,15 @@ def is_query_about_docs(query):
     direct_refs = {"document", "file", "uploaded", "pdf", "report", "article", "csv",
                    "excel", "spreadsheet", "image", "picture", "photo", "data", "table",
                    "chart", "plot", "graph", "column", "analyze", "summarize", "summary",
-                   "extract", "describe", "explain", "what", "list", "content"}
+                   "extract", "describe", "explain", "what", "list", "content",
+                   # Tire & sourcing specific
+                   "tire", "tyre", "tires", "tyres", "supplier", "suppliers", "quote",
+                   "price", "pricing", "spec", "specs", "specification", "brand", "size",
+                   "load", "rating", "index", "speed", "tread", "sidewall", "rim", "wheel",
+                   "ply", "mileage", "warranty", "moq", "lead", "delivery", "invoice",
+                   "stock", "inventory", "catalogue", "catalog", "oem", "fleet", "retread",
+                   "michelin", "bridgestone", "goodyear", "continental", "pirelli",
+                   "hankook", "yokohama", "dunlop", "toyo", "falken", "kumho", "maxxis"}
     if query_words & direct_refs:
         return True
 
@@ -648,11 +657,12 @@ def run_combined_query(prompt, image_entries, text_entries, df_entries, user, ci
     # Use vision-capable model if images present
     try:
         llm = get_llm(max_tokens=2000)
-        sys_content = f"You are Dentsu Smart Buddy. Today is {today_str}. "
+        sys_content = f"You are TireSource AI, a tire procurement and sourcing intelligence assistant. Today is {today_str}. "
         if has_images:
-            sys_content += ("Analyze any provided images in detail alongside document text. "
-                           "Describe what you see, extract text/data if present. ")
+            sys_content += ("Analyze any provided images in detail — tire markings, tread patterns, sidewall specs, damage assessments, labels, or supplier documents. "
+                           "Extract size codes, load/speed ratings, brand, and any relevant sourcing data. ")
         sys_content += ("Answer using the provided document/image context. "
+                       "Focus on tire specifications, supplier comparisons, pricing, inventory, and procurement insights. "
                        "If the answer isn't in the provided materials, say so clearly. "
                        "Format with markdown. Be thorough but concise.")
 
@@ -710,7 +720,7 @@ Write Python code that:
 1. Uses variable `df` (pandas DataFrame, already loaded)
 2. Uses matplotlib to create the chart
 3. Creates figure: fig, ax = plt.subplots(figsize=(10, 6))
-4. Style: dark background '#161B25', white text, colors ['#0033A0','#00C4B3','#6B8AFF','#FF6B6B','#FFB347']
+4. Style: dark background '#151C16', white text, colors ['#1A7A4A','#F5A623','#6BBA8A','#FF6B6B','#FFB347']
 5. Add title, labels. DO NOT call plt.show()
 
 Output ONLY Python code. No explanation. No markdown fences."""
@@ -790,8 +800,9 @@ def run_doc_qa(prompt, text_entries, user, cid):
         llm = get_llm()
         today_str = datetime.now().strftime("%B %d, %Y")
         resp = llm.invoke([
-            SystemMessage(content=f"You are Dentsu Smart Buddy. Today is {today_str}. "
-                          "Answer using ONLY the provided document context. "
+            SystemMessage(content=f"You are TireSource AI, a tire procurement and sourcing intelligence assistant. Today is {today_str}. "
+                          "Answer using ONLY the provided document context — supplier quotes, spec sheets, inventory lists, pricing data, or technical standards. "
+                          "Focus on tire sizes, brands, load ratings, pricing, lead times, MOQ, and supplier terms. "
                           "If the answer isn't in the documents, say so. Format with markdown."),
             HumanMessage(content=augmented)
         ])
@@ -899,7 +910,7 @@ def init_agent():
 
         @tool
         def search_web_extract_info(query: str) -> str:
-            """Search the web for current events, news, or any information."""
+            """Search the web for tire prices, suppliers, specifications, market info, and procurement data."""
             try:
                 results = tavily.invoke(query)
                 if not results: return "No results found."
@@ -925,11 +936,17 @@ def init_agent():
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     today_str = datetime.now().strftime("%B %d, %Y")
     prompt = ChatPromptTemplate.from_messages([
-        ("system", f"""You are Dentsu Smart Buddy — an AI research assistant.
+        ("system", f"""You are TireSource AI — an intelligent tire sourcing and procurement assistant.
 Today's date is {today_str}.
-Tools: search_web_extract_info (web search), get_weather (weather).
-ALWAYS use search_web_extract_info for current events, news, sports, elections, rankings.
-Format answers with markdown. Include source URLs. Be thorough but concise."""),
+Tools: search_web_extract_info (web search), get_weather (weather/logistics context).
+ALWAYS use search_web_extract_info for:
+- Tire prices, availability, and supplier information
+- Brand comparisons (Michelin, Bridgestone, Goodyear, Continental, Pirelli, Hankook, etc.)
+- Tire specifications, load indices, speed ratings, UTQG ratings
+- Industry news, recalls, market trends, import/export regulations
+- Fleet procurement, OEM fitments, retreading options
+Format answers with markdown. Include source URLs. Be thorough but concise.
+When comparing tires or suppliers, use tables for clarity."""),
         MessagesPlaceholder(variable_name="history", optional=True),
         ("human", "{query}"),
         MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -959,19 +976,19 @@ def render_login():
     with c2:
         st.markdown("""
         <div class="login-brand">
-            <div class="lb-icon">🤖</div>
-            <h1>Dentsu <span>Smart Buddy</span></h1>
-            <div class="lb-tag">Intelligent Research Assistant</div>
+            <div class="lb-icon">🛞</div>
+            <h1>TireSource <span>AI</span></h1>
+            <div class="lb-tag">Tire Sourcing & Procurement Intelligence</div>
             <div class="lb-desc">
-                Your AI-powered research companion — analyze documents, explore data,
-                search the web, and get insights in seconds.
+                Your AI-powered tire procurement companion — analyze supplier quotes,
+                compare specifications, track pricing, and make smarter sourcing decisions.
             </div>
             <div class="login-features">
-                <div class="login-feat"><span class="lf-dot"></span> Document Q&A</div>
-                <div class="login-feat"><span class="lf-dot"></span> Data Analysis</div>
-                <div class="login-feat"><span class="lf-dot"></span> Web Research</div>
-                <div class="login-feat"><span class="lf-dot"></span> URL Ingestion</div>
-                <div class="login-feat"><span class="lf-dot"></span> Smart Charts</div>
+                <div class="login-feat"><span class="lf-dot"></span> Supplier Q&A</div>
+                <div class="login-feat"><span class="lf-dot"></span> Price Analysis</div>
+                <div class="login-feat"><span class="lf-dot"></span> Spec Comparison</div>
+                <div class="login-feat"><span class="lf-dot"></span> Market Research</div>
+                <div class="login-feat"><span class="lf-dot"></span> Inventory Charts</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1003,7 +1020,7 @@ def render_login():
                         r = register_user(nc, p1)
                         if r: st.success(f"Account created! Sign in as **{nc}**.")
                         else: st.error("Username already taken.")
-        st.markdown("<p style='text-align:center;color:var(--text-400);font-size:0.68rem;margin-top:1.5rem;'>Powered by Dentsu AI · Secure & Confidential</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center;color:var(--text-400);font-size:0.68rem;margin-top:1.5rem;'>Powered by TireSource AI · Secure & Confidential</p>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════
@@ -1013,7 +1030,7 @@ def render_login():
 def render_sidebar():
     user = st.session_state["user"]
     with st.sidebar:
-        st.markdown('<div class="brand-box"><div class="logo">🤖 Dentsu Smart Buddy</div><div class="sub">AI Research Assistant</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="brand-box"><div class="logo">🛞 TireSource AI</div><div class="sub">Tire Sourcing & Procurement</div></div>', unsafe_allow_html=True)
         ini = user["display_name"][0].upper()
         st.markdown(f'<div class="user-pill"><div class="av">{ini}</div><div><div class="nm">{user["display_name"]}</div><div class="rl">{user["role"].title()}</div></div></div>', unsafe_allow_html=True)
 
@@ -1060,7 +1077,7 @@ def render_sidebar():
         if "processed_files" not in st.session_state: st.session_state["processed_files"] = []
         if "doc_texts" not in st.session_state: st.session_state["doc_texts"] = {}
 
-        uploaded = st.file_uploader("Upload PDF, DOCX, TXT, CSV, Excel, Images",
+        uploaded = st.file_uploader("Upload Quotes, Spec Sheets, Invoices, CSV, Excel, Images",
                                     type=["pdf","docx","txt","png","jpg","jpeg","gif","webp","csv","xlsx","xls"],
                                     accept_multiple_files=True, key="uploader")
         if uploaded:
@@ -1078,7 +1095,7 @@ def render_sidebar():
 
         # URL input
         st.markdown('<hr class="sd">', unsafe_allow_html=True)
-        url_input = st.text_input("🔗 Paste a blog/article URL", placeholder="https://example.com/article", key="url_input")
+        url_input = st.text_input("🔗 Paste a supplier/catalog URL", placeholder="https://supplier.com/catalog", key="url_input")
         if url_input and url_input.startswith("http"):
             if url_input not in st.session_state.get("url_docs", {}):
                 with st.spinner("Loading URL content..."):
@@ -1113,7 +1130,7 @@ def render_sidebar():
         if st.button("Sign out", use_container_width=True, key="logout"):
             for k in list(st.session_state.keys()): del st.session_state[k]
             st.rerun()
-        st.markdown("<p style='color:var(--text-400);font-size:0.62rem;text-align:center;padding-top:0.8rem;'>Dentsu Smart Buddy v5.1</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color:var(--text-400);font-size:0.62rem;text-align:center;padding-top:0.8rem;'>TireSource AI v5.1</p>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════
@@ -1135,15 +1152,15 @@ def render_chat():
     if not messages:
         st.markdown("""
         <div class="welcome-area">
-            <div class="w-icon">🤖</div>
-            <h2>Hi! I'm Dentsu Smart Buddy</h2>
-            <p>Upload documents, paste URLs, or just ask me anything.
-            I handle PDFs, images, CSVs, Excel files, and web research — all at once.</p>
+            <div class="w-icon">🛞</div>
+            <h2>Hi! I'm TireSource AI</h2>
+            <p>Upload supplier quotes, spec sheets, price lists, or inventory files — or just ask me anything about tires.
+            I handle PDFs, images, CSVs, Excel files, and live supplier research — all at once.</p>
         </div>""", unsafe_allow_html=True)
 
     for msg in messages:
         role = msg["role"]
-        avatar = "🟢" if role == "user" else "🤖"
+        avatar = "🟢" if role == "user" else "🛞"
         with st.chat_message(role, avatar=avatar):
             if role == "user":
                 st.markdown(msg["content"])
@@ -1155,7 +1172,7 @@ def render_chat():
                     st.pyplot(st.session_state["charts"][msg["chart_key"]])
                 render_sources_and_tools(sources, msg.get("tool_calls"))
 
-    prompt = st.chat_input("Type your question here...", key="chat_input")
+    prompt = st.chat_input("Ask about tires, suppliers, pricing, specs...", key="chat_input")
 
     if prompt:
         user = st.session_state["user"]
@@ -1179,7 +1196,7 @@ def render_chat():
         if pending:
             yes_words = {"yes", "y", "yeah", "sure", "ok", "go ahead", "yep", "please", "do it"}
             if prompt.strip().lower() in yes_words:
-                with st.chat_message("assistant", avatar="🤖"):
+                with st.chat_message("assistant", avatar="🛞"):
                     with st.spinner("Searching the web..."):
                         answer, sources, tool_info = run_web_agent(pending, user, cid)
                     st.markdown(clean_answer_urls(answer, sources) if sources else answer)
@@ -1190,8 +1207,8 @@ def render_chat():
 
             no_words = {"no", "n", "nope", "nah", "cancel"}
             if prompt.strip().lower() in no_words:
-                reply = "No problem! Ask me anything about your uploaded documents."
-                with st.chat_message("assistant", avatar="🤖"):
+                reply = "No problem! Ask me anything about your uploaded sourcing documents."
+                with st.chat_message("assistant", avatar="🛞"):
                     st.markdown(reply)
                 save_message(cid, "assistant", reply)
                 st.session_state["messages"].append({"role": "assistant", "content": reply, "sources": None, "tool_calls": None})
@@ -1201,7 +1218,7 @@ def render_chat():
         # ── Check for URL in chat ──
         detected_url = detect_url(prompt)
         if detected_url and detected_url not in st.session_state.get("url_docs", {}):
-            with st.chat_message("assistant", avatar="🤖"):
+            with st.chat_message("assistant", avatar="🛞"):
                 with st.spinner(f"Loading content from URL..."):
                     content = load_url_content(detected_url)
                     if not content.startswith("["):
@@ -1225,7 +1242,7 @@ def render_chat():
                 # Route to combined document handler (supports all doc types at once)
                 image_entries, text_entries, df_entries = classify_doc_types()
 
-                with st.chat_message("assistant", avatar="🤖"):
+                with st.chat_message("assistant", avatar="🛞"):
                     with st.spinner("Analyzing your documents..."):
                         answer, sources, tool_info, chart_fig = run_combined_query(
                             prompt, image_entries, text_entries, df_entries, user, cid
@@ -1250,10 +1267,10 @@ def render_chat():
 
             else:
                 # Not about docs — ask user if they want web search
-                routing_msg = ("This query doesn't appear to be related to your uploaded documents.\n\n"
-                              "Would you like me to **search the web** for an answer?\n\n"
+                routing_msg = ("This query doesn't appear to be related to your uploaded sourcing documents.\n\n"
+                              "Would you like me to **search the web** for tire pricing, supplier info, or specifications?\n\n"
                               "Type **Yes** to search the web, or **No** to cancel.")
-                with st.chat_message("assistant", avatar="🤖"):
+                with st.chat_message("assistant", avatar="🛞"):
                     st.markdown(routing_msg)
                 st.session_state["pending_web_search"] = prompt
                 save_message(cid, "assistant", routing_msg)
@@ -1263,7 +1280,7 @@ def render_chat():
 
         else:
             # No docs uploaded — straight to web agent
-            with st.chat_message("assistant", avatar="🤖"):
+            with st.chat_message("assistant", avatar="🛞"):
                 with st.spinner("Researching your question..."):
                     answer, sources, tool_info = run_web_agent(prompt, user, cid)
                 st.markdown(clean_answer_urls(answer, sources) if sources else answer)
