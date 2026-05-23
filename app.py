@@ -1559,76 +1559,78 @@ def render_chat():
             st.session_state["messages"].append({"role": "assistant", "content": answer, "sources": None, "tool_calls": "URL Content"})
             return
 
-        # ── MAIN ROUTING ──
+        # ══════════════════════════════════════════════════════════════
+        # MAIN ROUTING
+        #
+        #   1. Out of context?      → reject, show OOC message
+        #   2. Has docs + hybrid?   → Hybrid agent (data + web together)
+        #   3. Has docs?            → answer from my data first
+        #        └─ not in docs?    → fall through to web search
+        #   4. No docs              → web search directly
+        #
+        # Hybrid triggers ONLY when user explicitly says things like:
+        # "compare my prices with market", "find suppliers for my inventory"
+        # ══════════════════════════════════════════════════════════════
         has_docs = bool(st.session_state.get("doc_texts"))
 
-        # ── Gate 1: Out-of-context check (always runs first) ──
+        # ── 1. Out-of-context guard (always first) ────────────────────
         if not is_tire_related(prompt):
             with st.chat_message("assistant", avatar="🛞"):
                 st.markdown(OUT_OF_CONTEXT_MSG)
             save_message(cid, "assistant", OUT_OF_CONTEXT_MSG)
             st.session_state["messages"].append(
-                {"role": "assistant", "content": OUT_OF_CONTEXT_MSG, "sources": None, "tool_calls": "Out of Context"}
+                {"role": "assistant", "content": OUT_OF_CONTEXT_MSG,
+                 "sources": None, "tool_calls": "Out of Context"}
             )
 
-        elif has_docs:
-            # ── Hybrid check: needs both docs + web? ──
-            if is_hybrid_query(prompt):
-                with st.chat_message("assistant", avatar="🛞"):
-                    with st.spinner("🔀 Cross-referencing your data with live market info..."):
-                        answer, sources, tool_info = run_hybrid_agent(prompt, user, cid)
-                    display_text = clean_answer_urls(answer, sources) if sources else answer
-                    st.markdown(display_text)
-                    render_sources_and_tools(sources, tool_info)
-                save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
-                st.session_state["messages"].append(
-                    {"role": "assistant", "content": answer, "sources": sources, "tool_calls": tool_info}
-                )
-
-            # ── Doc-only query ──
-            elif is_query_about_docs(prompt):
-                image_entries, text_entries, df_entries = classify_doc_types()
-                with st.chat_message("assistant", avatar="🛞"):
-                    with st.spinner("Analyzing your documents..."):
-                        answer, sources, tool_info, chart_fig = run_combined_query(
-                            prompt, image_entries, text_entries, df_entries, user, cid
-                        )
-                    display_text = clean_answer_urls(answer, sources) if sources else answer
-                    st.markdown(display_text)
-                    chart_key = None
-                    if chart_fig is not None:
-                        chart_key = f"chart_{uuid.uuid4().hex[:8]}"
-                        st.session_state.setdefault("charts", {})[chart_key] = chart_fig
-                        st.pyplot(chart_fig)
-                    render_sources_and_tools(sources, tool_info)
-                save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
-                st.session_state["messages"].append(
-                    {"role": "assistant", "content": answer, "sources": sources,
-                     "tool_calls": tool_info, "chart_key": chart_key}
-                )
-
-            else:
-                # Tire-related but not in docs — offer web search
-                routing_msg = ("This doesn't appear to be in your uploaded sourcing documents.\n\n"
-                              "Would you like me to **search the web** for tire pricing, supplier info, or specifications?\n\n"
-                              "Type **Yes** to search the web, or **No** to cancel.")
-                with st.chat_message("assistant", avatar="🛞"):
-                    st.markdown(routing_msg)
-                st.session_state["pending_web_search"] = prompt
-                save_message(cid, "assistant", routing_msg)
-                st.session_state["messages"].append(
-                    {"role": "assistant", "content": routing_msg, "sources": None, "tool_calls": "Smart Routing"}
-                )
-
-        else:
-            # No docs — web only (tire-related confirmed above)
+        # ── 2. Hybrid: explicitly wants data + web together ───────────
+        elif has_docs and is_hybrid_query(prompt):
             with st.chat_message("assistant", avatar="🛞"):
-                with st.spinner("Researching your question..."):
+                with st.spinner("🔀 Cross-referencing your data with live market info..."):
+                    answer, sources, tool_info = run_hybrid_agent(prompt, user, cid)
+                display_text = clean_answer_urls(answer, sources) if sources else answer
+                st.markdown(display_text)
+                render_sources_and_tools(sources, tool_info)
+            save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": answer,
+                 "sources": sources, "tool_calls": tool_info}
+            )
+
+        # ── 3. Has docs → answer from my uploaded data first ─────────
+        elif has_docs:
+            image_entries, text_entries, df_entries = classify_doc_types()
+            with st.chat_message("assistant", avatar="🛞"):
+                with st.spinner("Analyzing your documents..."):
+                    answer, sources, tool_info, chart_fig = run_combined_query(
+                        prompt, image_entries, text_entries, df_entries, user, cid
+                    )
+                display_text = clean_answer_urls(answer, sources) if sources else answer
+                st.markdown(display_text)
+                chart_key = None
+                if chart_fig is not None:
+                    chart_key = f"chart_{uuid.uuid4().hex[:8]}"
+                    st.session_state.setdefault("charts", {})[chart_key] = chart_fig
+                    st.pyplot(chart_fig)
+                render_sources_and_tools(sources, tool_info)
+            save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": answer, "sources": sources,
+                 "tool_calls": tool_info, "chart_key": chart_key}
+            )
+
+        # ── 4. No docs → go straight to web search ───────────────────
+        else:
+            with st.chat_message("assistant", avatar="🛞"):
+                with st.spinner("Searching the web..."):
                     answer, sources, tool_info = run_web_agent(prompt, user, cid)
                 st.markdown(clean_answer_urls(answer, sources) if sources else answer)
                 render_sources_and_tools(sources, tool_info)
             save_message(cid, "assistant", answer, sources=sources, tool_calls=tool_info)
-            st.session_state["messages"].append({"role": "assistant", "content": answer, "sources": sources, "tool_calls": tool_info})
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": answer,
+                 "sources": sources, "tool_calls": tool_info}
+            )
 
 
 # ═══════════════════════════════════════════════
